@@ -4,6 +4,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Collections.Generic;
 
 namespace UDPServer
 {
@@ -36,8 +38,12 @@ namespace UDPServer
 				if (BitConverter.IsLittleEndian)
 					Array.Reverse(sizebytes);
 
-				// Convert to bytes to uint
+				// Convert bytes to uint
 				UInt32 payloadsize = BitConverter.ToUInt32(sizebytes, 0);
+
+				// Extract encrypted data
+				//receiveddata = DecryptBytes(receiveddata, "mylongkey", 1 + 4, (int)payloadsize);
+				//byte[] data = Inflate(receiveddata, 0, receiveddata.Length);
 
 				// Extract received data
 				byte[] data = Inflate(receiveddata, 1 + 4, (int)payloadsize);
@@ -65,5 +71,48 @@ namespace UDPServer
 			zipStream.Close();
 			return stream.ToArray();
 		}
+
+		//TODO: Make sure IV is set to something else
+		public static byte[] DecryptBytes(byte[] cipherbytes, string key, int index, int length, byte[] iv = null)
+		{
+			iv = iv ?? new byte[] {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+			//Set up the decryption objects
+			using (AesCryptoServiceProvider acsp = new AesCryptoServiceProvider())
+			{
+				acsp.BlockSize = 128;
+				acsp.KeySize = 128;
+				acsp.Mode = CipherMode.CBC;
+				acsp.Padding = PaddingMode.PKCS7;
+
+				acsp.GenerateIV();
+
+				acsp.IV = iv;
+				acsp.Key = GetKey(Encoding.Default.GetBytes(key), acsp);
+
+				ICryptoTransform ictE = acsp.CreateDecryptor();
+
+				MemoryStream ms = new MemoryStream();
+				CryptoStream cs = new CryptoStream(ms, ictE, CryptoStreamMode.Write);
+				cs.Write(cipherbytes, index, length);
+				cs.Close();
+
+				return ms.ToArray();
+			}
+		}
+
+		private static byte[] GetKey(byte[] suggestedKey, SymmetricAlgorithm p)
+		{
+			byte[] kRaw = suggestedKey;
+			List<byte> kList = new List<byte>();
+
+			for (int i = 0; i < p.LegalKeySizes[0].MinSize; i += 8)
+			{
+				kList.Add(kRaw[(i / 8) % kRaw.Length]);
+			}
+			byte[] k = kList.ToArray();
+			return k;
+		}
+
 	}
 }
